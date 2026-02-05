@@ -2,9 +2,10 @@ from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List
-
+import yfinance as yf
 from app import models, schemas, services
 from app.database import engine, get_db
+import math
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -64,3 +65,65 @@ def delete_asset(asset_id: int, db: Session = Depends(get_db)):
     db.delete(asset)
     db.commit()
     return {"message": "Ativo deletado com sucesso"}
+
+@app.get("/api/market-summary")
+def get_market_summary(currency: str = "BRL"):
+    import yfinance as yf
+    
+    if currency == "BRL":
+        tickers_map = {
+            "Dólar": "BRL=X",
+            "Euro": "EURBRL=X",
+            "Bitcoin": "BTC-USD",
+            "Yuan": "CNYBRL=X",
+            "Iene": "JPYBRL=X",
+            "Libra": "GBPBRL=X"
+        }
+    else:
+        tickers_map = {
+            "Euro": "EURUSD=X",
+            "Bitcoin": "BTC-USD",
+            "Real": "BRL=X",
+            "Iene": "JPY=X",
+            "Yuan": "CNY=X",
+            "Libra": "GBPUSD=X"
+        }
+
+    data = []
+    tickers_list = list(tickers_map.values())
+    
+    try:
+        df = yf.download(tickers_list, period="1d", progress=False)['Close']
+        
+        last_quotes = df.iloc[-1]
+
+        for name, ticker in tickers_map.items():
+            try:
+                if ticker not in last_quotes:
+                    continue
+
+                val = last_quotes[ticker]
+                price = float(val)
+
+                if math.isnan(price):
+                    continue
+                
+                if name == "Bitcoin" and currency == "BRL" and ticker == "BTC-USD":
+                    dolar = float(last_quotes.get("BRL=X", 5.80))
+                    price = price * dolar
+
+                data.append({
+                    "name": name,
+                    "ticker": ticker,
+                    "price": price,
+                    "currency": currency
+                })
+            except Exception as e:
+                print(f"Erro ao processar {name}: {e}")
+                continue
+            
+    except Exception as e:
+        print(f"Erro geral no ticker: {e}")
+        return []
+
+    return data
