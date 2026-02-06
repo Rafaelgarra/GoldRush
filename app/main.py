@@ -236,3 +236,75 @@ def add_asset(transaction: schemas.TransactionCreate, db: Session = Depends(get_
     db.commit()
     db.refresh(db_transaction)
     return db_transaction
+
+@app.get("/api/market-summary")
+def get_market_summary(currency: str = "BRL"):
+    """
+    Retorna cotações resumidas (Dólar, Euro, BTC, Yuan, Iene)
+    """
+    if currency == "BRL":
+        tickers_map = { 
+            "Dólar": "BRL=X", 
+            "Euro": "EURBRL=X", 
+            "Bitcoin": "BTC-USD", 
+            "Yuan": "CNYBRL=X", 
+            "Iene": "JPYBRL=X", 
+            "Libra": "GBPBRL=X" 
+        }
+    else:
+        # Caso queira ver em Dólar no futuro
+        tickers_map = { 
+            "Euro": "EURUSD=X", 
+            "Bitcoin": "BTC-USD", 
+            "Real": "BRL=X", 
+            "Iene": "JPY=X", 
+            "Yuan": "CNY=X", 
+            "Libra": "GBPUSD=X" 
+        }
+
+    data = []
+    try:
+        # Baixa tudo de uma vez (download em lote é mais rápido)
+        df = yf.download(list(tickers_map.values()), period="1d", progress=False)['Close']
+        
+        # Pega a última linha (preço mais atual)
+        # Se veio mais de um ativo, é um DataFrame, senão é Series. Tratamos aqui:
+        if len(tickers_map) > 1:
+            last_prices = df.iloc[-1]
+        else:
+            # Caso raro de pedir só 1, o yfinance muda o formato
+            last_prices = {list(tickers_map.values())[0]: df.iloc[-1]}
+
+        for name, ticker in tickers_map.items():
+            try:
+                # Verifica se o ticker existe no retorno do Yahoo
+                val = last_prices.get(ticker)
+                
+                # Se não encontrou ou é NaN (Not a Number), pula
+                if val is None or math.isnan(val): 
+                    continue
+                
+                price = float(val)
+
+                # Conversão Especial: Bitcoin vem em Dólar, precisamos converter pra Real
+                if name == "Bitcoin" and currency == "BRL":
+                    dolar_ticker = "BRL=X"
+                    # Tenta pegar o dólar do mesmo lote, ou usa 5.80 de fallback
+                    dolar_val = last_prices.get(dolar_ticker)
+                    dolar = float(dolar_val) if (dolar_val and not math.isnan(dolar_val)) else 5.80
+                    price = price * dolar
+                
+                data.append({ 
+                    "name": name, 
+                    "ticker": ticker, 
+                    "price": round(price, 4) if price < 1 else round(price, 2), # Iene tem valor baixo, precisa de mais casas
+                    "currency": currency 
+                })
+            except Exception as e:
+                print(f"Erro ao processar {name}: {e}")
+                continue
+    except Exception as e:
+        print(f"Erro geral no market-summary: {e}")
+        pass
+        
+    return data
