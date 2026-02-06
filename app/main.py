@@ -194,6 +194,45 @@ def add_asset(asset: schemas.AssetCreate, current_user: models.User = Depends(ge
     db.commit()
     return {"message": "Ativo protegido e salvo!"}
 
+@app.delete("/api/portfolio/{asset_id}")
+def delete_asset(asset_id: int, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    
+    asset = db.query(models.Asset).filter(models.Asset.id == asset_id).first()
+    
+    if not asset:
+        raise HTTPException(status_code=404, detail="Ativo não encontrado")
+    
+    if asset.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Você não tem permissão para deletar este ativo")
+    
+    db.delete(asset)
+    db.commit()
+    
+    return {"message": "Ativo removido com sucesso"}
+
+@app.put("/api/portfolio/{asset_id}")
+def update_asset(asset_id: int, asset_update: schemas.AssetCreate, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # 1. Busca
+    asset = db.query(models.Asset).filter(models.Asset.id == asset_id).first()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Ativo não encontrado")
+    if asset.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Sem permissão")
+
+    # 2. Criptografa os novos valores
+    qtd_enc = security.encrypt_data(str(asset_update.quantity))
+    price_enc = security.encrypt_data(str(asset_update.price_paid))
+
+    # 3. Atualiza
+    asset.symbol = asset_update.symbol
+    asset.quantity_enc = qtd_enc
+    asset.price_paid_enc = price_enc
+    asset.asset_type = asset_update.asset_type
+    asset.currency = asset_update.currency
+    
+    db.commit()
+    return {"message": "Ativo atualizado com sucesso"}
+
 # =======================
 # 🌍 ROTAS PÚBLICAS (PREÇOS)
 # =======================
@@ -228,14 +267,6 @@ def get_price(ticker: str):
     except Exception as e:
         print(f"Erro ao buscar {ticker}: {e}")
         return {"error": str(e)}
-
-@app.post("/api/portfolio/add", response_model=schemas.TransactionResponse)
-def add_asset(transaction: schemas.TransactionCreate, db: Session = Depends(get_db)):
-    db_transaction = models.Transaction(**transaction.dict())
-    db.add(db_transaction)
-    db.commit()
-    db.refresh(db_transaction)
-    return db_transaction
 
 @app.get("/api/market-summary")
 def get_market_summary(currency: str = "BRL"):
