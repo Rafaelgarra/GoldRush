@@ -346,7 +346,7 @@ def get_market_summary(currency: str = "BRL"):
 # =======================
 
 @app.post("/api/simulation")
-def simulate_future(data: SimulationRequest):
+def simulate_future(data: schemas.SimulationRequest):
     """
     Calcula a evolução do patrimônio mês a mês (Juros Compostos).
     """
