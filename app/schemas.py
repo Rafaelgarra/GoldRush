@@ -69,3 +69,9 @@ class AssetResponse(AssetCreate):
     purchase_date: datetime
     class Config:
         from_attributes = True
+
+class SimulationRequest(BaseModel):
+    initial_amount: float
+    monthly_contribution: float
+    interest_rate_yearly: float
+    years: int

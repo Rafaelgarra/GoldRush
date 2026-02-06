@@ -10,6 +10,7 @@ import math
 import os
 from typing import List
 from dotenv import load_dotenv
+from pydantic import BaseModel
 
 # Nossos módulos
 from app import models, schemas, database, security
@@ -339,3 +340,54 @@ def get_market_summary(currency: str = "BRL"):
         pass
         
     return data
+
+# =======================
+# 🔮 ROTAS DO SIMULADOR
+# =======================
+
+@app.post("/api/simulation")
+def simulate_future(data: SimulationRequest):
+    """
+    Calcula a evolução do patrimônio mês a mês (Juros Compostos).
+    """
+    months = data.years * 12
+    # Converte taxa anual para mensal
+    monthly_rate = (1 + (data.interest_rate_yearly / 100))**(1/12) - 1
+    
+    current_total = data.initial_amount
+    total_invested = data.initial_amount
+    
+    history = []
+    
+    # Mês 0 (Ponto de partida)
+    history.append({
+        "month": 0,
+        "invested": round(total_invested, 2),
+        "total": round(current_total, 2),
+        "interest": 0
+    })
+
+    for m in range(1, months + 1):
+        # 1. O dinheiro rende primeiro
+        yield_amount = current_total * monthly_rate
+        current_total += yield_amount
+        
+        # 2. Depois você aporta mais dinheiro
+        current_total += data.monthly_contribution
+        total_invested += data.monthly_contribution
+        
+        # 3. Salva no histórico para o gráfico
+        # (Opcional: Se for muitos anos, pode salvar só a cada 6 meses pra economizar dados)
+        history.append({
+            "month": m,
+            "invested": round(total_invested, 2),
+            "total": round(current_total, 2),
+            "interest": round(current_total - total_invested, 2)
+        })
+        
+    return {
+        "final_total": round(current_total, 2),
+        "total_invested": round(total_invested, 2),
+        "total_interest": round(current_total - total_invested, 2),
+        "history": history
+    }
