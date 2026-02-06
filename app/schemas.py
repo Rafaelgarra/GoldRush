@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr
 from datetime import date, datetime
 from typing import List, Optional
 
@@ -44,3 +44,28 @@ class SimulationResponse(BaseModel):
     final_unit_price: float
     roi_percentage: float
     history: List[SimulationHistoryPoint]
+
+class UserRegister(BaseModel):
+    email: EmailStr
+    password: str
+
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+class AssetCreate(BaseModel):
+    symbol: str
+    quantity: float
+    price_paid: float
+    asset_type: str
+    currency: str = "BRL"
+
+class AssetResponse(AssetCreate):
+    id: int
+    purchase_date: datetime
+    class Config:
+        from_attributes = True

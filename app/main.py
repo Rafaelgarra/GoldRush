@@ -1,20 +1,34 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, Depends, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
-from typing import List
+from authlib.integrations.starlette_client import OAuth
+from starlette.middleware.sessions import SessionMiddleware
 import yfinance as yf
-from app import models, schemas, services
-from app.database import engine, get_db
 import math
+import os
+from typing import List
+from dotenv import load_dotenv
 
-models.Base.metadata.create_all(bind=engine)
+# Nossos módulos
+from app import models, schemas, database, security
 
-app = FastAPI(title="GoldRush API - Neon Edition")
+load_dotenv()
 
+# --- CRIA O BANCO (Se não existir) ---
+# IMPORTANTE: Se der erro, apague o arquivo 'sql_app.db' para ele recriar do zero!
+models.Base.metadata.create_all(bind=database.engine)
+
+app = FastAPI(title="GoldRush API - Secure Edition")
+
+app.add_middleware(SessionMiddleware, secret_key=os.getenv("SECRET_KEY", "uma_chave_secreta_provisoria"))
+
+# --- CONFIGURAÇÃO CORS ---
 origins = [
     "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "https://goldrush-web.vercel.app"
+    "https://goldrush-web.vercel.app",
+    os.getenv("FRONTEND_URL", "http://localhost:3000")
 ]
 
 app.add_middleware(
@@ -25,105 +39,203 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get("/")
-def read_root():
-    return {"status": "online", "db": "Postgres (Neon)"}
+# --- CONFIGURAÇÃO GOOGLE OAUTH ---
+oauth = OAuth()
+oauth.register(
+    name='google',
+    client_id=os.getenv("GOOGLE_CLIENT_ID"),
+    client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
+    server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
+    client_kwargs={'scope': 'openid email profile'}
+)
 
-@app.get("/api/price/{symbol}", response_model=schemas.PriceSuggestion)
-def get_price(symbol: str):
-    result = services.get_current_asset_price(symbol)
-    if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
-    return result
+# --- DEPENDÊNCIAS ---
+def get_db():
+    db = database.SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
-@app.post("/api/portfolio/add", response_model=schemas.TransactionResponse)
-def add_asset(transaction: schemas.TransactionCreate, db: Session = Depends(get_db)):
-    db_transaction = models.Transaction(**transaction.dict())
-    db.add(db_transaction)
-    db.commit()
-    db.refresh(db_transaction)
-    return db_transaction
-
-@app.get("/api/portfolio", response_model=List[schemas.TransactionResponse])
-def list_assets(db: Session = Depends(get_db)):
-    return db.query(models.Transaction).all()
-
-@app.post("/api/simulation", response_model=schemas.SimulationResponse)
-def simulate_growth(request: schemas.SimulationRequest):
-    result = services.calculate_simulation(request)
-    if "error" in result:
-        raise HTTPException(status_code=400, detail=result["error"])
-    return result
-
-@app.delete("/api/portfolio/{asset_id}")
-def delete_asset(asset_id: int, db: Session = Depends(get_db)):
-    asset = db.query(models.Transaction).filter(models.Transaction.id == asset_id).first()
+# Verifica quem é o usuário baseado no Token JWT
+async def get_current_user(token: str = Depends(security.oauth2_scheme), db: Session = Depends(get_db)):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Token inválido",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = security.jwt.decode(token, security.SECRET_KEY, algorithms=[security.ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            raise credentials_exception
+    except security.JWTError:
+        raise credentials_exception
     
-    if not asset:
-        raise HTTPException(status_code=404, detail="Ativo não encontrado")
+    user = db.query(models.User).filter(models.User.email == email).first()
+    if user is None:
+        raise credentials_exception
+    return user
+
+# =======================
+# 🔐 ROTAS DE AUTENTICAÇÃO
+# =======================
+
+# 1. Registro (Email/Senha)
+@app.post("/api/register", response_model=schemas.Token)
+def register(user: schemas.UserRegister, db: Session = Depends(get_db)):
+    db_user = db.query(models.User).filter(models.User.email == user.email).first()
+    if db_user:
+        raise HTTPException(status_code=400, detail="Email já cadastrado")
     
-    db.delete(asset)
+    hashed_pwd = security.get_password_hash(user.password)
+    # Criamos o usuário já ativo para facilitar, depois implementamos email confirm
+    new_user = models.User(email=user.email, hashed_password=hashed_pwd, is_active=True, provider="email")
+    db.add(new_user)
     db.commit()
-    return {"message": "Ativo deletado com sucesso"}
+    db.refresh(new_user)
+    
+    access_token = security.create_access_token(data={"sub": new_user.email})
+    return {"access_token": access_token, "token_type": "bearer"}
+
+# 2. Login (Email/Senha)
+@app.post("/api/token", response_model=schemas.Token)
+def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.email == form_data.username).first()
+    if not user or not user.hashed_password or not security.verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Email ou senha incorretos")
+    
+    access_token = security.create_access_token(data={"sub": user.email})
+    return {"access_token": access_token, "token_type": "bearer"}
+
+# 3. Login GOOGLE (Inicia)
+@app.get("/auth/google")
+async def login_google(request: Request):
+    redirect_uri = request.url_for('auth_google_callback')
+    return await oauth.google.authorize_redirect(request, redirect_uri)
+
+# 4. Callback GOOGLE (Retorno)
+@app.get("/auth/google/callback")
+async def auth_google_callback(request: Request, db: Session = Depends(get_db)):
+    try:
+        token = await oauth.google.authorize_access_token(request)
+        user_info = token.get('userinfo')
+        email = user_info.email
+        
+        # Procura ou Cria usuário
+        user = db.query(models.User).filter(models.User.email == email).first()
+        if not user:
+            user = models.User(
+                email=email, 
+                is_active=True, 
+                provider="google",
+                avatar_url=user_info.picture
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+        
+        # Gera token JWT
+        access_token = security.create_access_token(data={"sub": user.email})
+        
+        # Redireciona pro Front com o token
+        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+        return RedirectResponse(url=f"{frontend_url}/auth/callback?token={access_token}")
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Erro Login Google: {e}")
+
+# =======================
+# 💰 ROTAS PORTFÓLIO (PROTEGIDAS)
+# =======================
+
+@app.get("/api/portfolio", response_model=List[schemas.AssetResponse])
+def get_portfolio(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Pega só os ativos DESTE usuário
+    assets_enc = db.query(models.Asset).filter(models.Asset.owner_id == current_user.id).all()
+    
+    results = []
+    for asset in assets_enc:
+        try:
+            # DESCRIPTOGRAFA OS DADOS PARA ENVIAR PRO FRONT
+            qtd = float(security.decrypt_data(asset.quantity_enc))
+            price = float(security.decrypt_data(asset.price_paid_enc))
+            
+            results.append({
+                "id": asset.id,
+                "symbol": asset.symbol,
+                "quantity": qtd,
+                "price_paid": price,
+                "asset_type": asset.asset_type,
+                "currency": asset.currency,
+                "purchase_date": asset.purchase_date
+            })
+        except Exception as e:
+            print(f"Erro decriptação asset {asset.id}: {e}")
+            continue
+            
+    return results
+
+@app.post("/api/portfolio")
+def add_asset(asset: schemas.AssetCreate, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # CRIPTOGRAFA OS DADOS ANTES DE SALVAR
+    qtd_enc = security.encrypt_data(str(asset.quantity))
+    price_enc = security.encrypt_data(str(asset.price_paid))
+    
+    new_asset = models.Asset(
+        symbol=asset.symbol,
+        quantity_enc=qtd_enc,
+        price_paid_enc=price_enc,
+        asset_type=asset.asset_type,
+        currency=asset.currency,
+        owner_id=current_user.id # Vincula ao usuário logado
+    )
+    db.add(new_asset)
+    db.commit()
+    return {"message": "Ativo protegido e salvo!"}
+
+# =======================
+# 🌍 ROTAS PÚBLICAS (PREÇOS)
+# =======================
+
+@app.get("/api/price/{ticker}")
+def get_price(ticker: str):
+    try:
+        # Se for Bitcoin, usa paridade USD
+        symbol = "BTC-USD" if ticker == "BTC-USD" else ticker
+        
+        stock = yf.Ticker(symbol)
+        data = stock.history(period="1d")
+        if data.empty:
+            return {"error": "Ticker não encontrado"}
+        price = data['Close'].iloc[-1]
+        return {"symbol": ticker, "current_price": price}
+    except Exception as e:
+        return {"error": str(e)}
 
 @app.get("/api/market-summary")
 def get_market_summary(currency: str = "BRL"):
-    import yfinance as yf
-    
+    # (Mesmo código do Ticker que te passei antes)
     if currency == "BRL":
-        tickers_map = {
-            "Dólar": "BRL=X",
-            "Euro": "EURBRL=X",
-            "Bitcoin": "BTC-USD",
-            "Yuan": "CNYBRL=X",
-            "Iene": "JPYBRL=X",
-            "Libra": "GBPBRL=X"
-        }
+        tickers_map = { "Dólar": "BRL=X", "Euro": "EURBRL=X", "Bitcoin": "BTC-USD", "Yuan": "CNYBRL=X", "Iene": "JPYBRL=X", "Libra": "GBPBRL=X" }
     else:
-        tickers_map = {
-            "Euro": "EURUSD=X",
-            "Bitcoin": "BTC-USD",
-            "Real": "BRL=X",
-            "Iene": "JPY=X",
-            "Yuan": "CNY=X",
-            "Libra": "GBPUSD=X"
-        }
+        tickers_map = { "Euro": "EURUSD=X", "Bitcoin": "BTC-USD", "Real": "BRL=X", "Iene": "JPY=X", "Yuan": "CNY=X", "Libra": "GBPUSD=X" }
 
     data = []
-    tickers_list = list(tickers_map.values())
-    
     try:
-        df = yf.download(tickers_list, period="1d", progress=False)['Close']
-        
-        last_quotes = df.iloc[-1]
-
+        df = yf.download(list(tickers_map.values()), period="1d", progress=False)['Close'].iloc[-1]
         for name, ticker in tickers_map.items():
             try:
-                if ticker not in last_quotes:
-                    continue
-
-                val = last_quotes[ticker]
-                price = float(val)
-
-                if math.isnan(price):
-                    continue
+                if ticker not in df: continue
+                price = float(df[ticker])
+                if math.isnan(price): continue
                 
-                if name == "Bitcoin" and currency == "BRL" and ticker == "BTC-USD":
-                    dolar = float(last_quotes.get("BRL=X", 5.80))
+                # Conversão manual BTC para BRL se necessário
+                if name == "Bitcoin" and currency == "BRL":
+                    dolar = float(df.get("BRL=X", 5.80))
                     price = price * dolar
-
-                data.append({
-                    "name": name,
-                    "ticker": ticker,
-                    "price": price,
-                    "currency": currency
-                })
-            except Exception as e:
-                print(f"Erro ao processar {name}: {e}")
-                continue
-            
-    except Exception as e:
-        print(f"Erro geral no ticker: {e}")
-        return []
-
+                
+                data.append({ "name": name, "ticker": ticker, "price": price, "currency": currency })
+            except: continue
+    except: pass
     return data
