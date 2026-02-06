@@ -201,41 +201,38 @@ def add_asset(asset: schemas.AssetCreate, current_user: models.User = Depends(ge
 @app.get("/api/price/{ticker}")
 def get_price(ticker: str):
     try:
-        # Se for Bitcoin, usa paridade USD
-        symbol = "BTC-USD" if ticker == "BTC-USD" else ticker
-        
+        if ticker in ["BTC", "ETH"]:
+             symbol = f"{ticker}-USD"
+        else:
+             symbol = ticker.upper()
+
         stock = yf.Ticker(symbol)
-        data = stock.history(period="1d")
+        data = stock.history(period="5d") 
+        
+        if data.empty and not symbol.endswith(".SA") and not symbol.endswith("-USD"):
+            symbol_br = symbol + ".SA"
+            stock = yf.Ticker(symbol_br)
+            data = stock.history(period="5d")
+            if not data.empty:
+                symbol = symbol_br
+
         if data.empty:
-            return {"error": "Ticker não encontrado"}
+            return {"error": "Ticker não encontrado", "symbol": ticker}
+            
         price = data['Close'].iloc[-1]
-        return {"symbol": ticker, "current_price": price}
+        
+        return {
+            "symbol": symbol, 
+            "current_price": round(price, 2)
+        }
     except Exception as e:
+        print(f"Erro ao buscar {ticker}: {e}")
         return {"error": str(e)}
 
-@app.get("/api/market-summary")
-def get_market_summary(currency: str = "BRL"):
-    # (Mesmo código do Ticker que te passei antes)
-    if currency == "BRL":
-        tickers_map = { "Dólar": "BRL=X", "Euro": "EURBRL=X", "Bitcoin": "BTC-USD", "Yuan": "CNYBRL=X", "Iene": "JPYBRL=X", "Libra": "GBPBRL=X" }
-    else:
-        tickers_map = { "Euro": "EURUSD=X", "Bitcoin": "BTC-USD", "Real": "BRL=X", "Iene": "JPY=X", "Yuan": "CNY=X", "Libra": "GBPUSD=X" }
-
-    data = []
-    try:
-        df = yf.download(list(tickers_map.values()), period="1d", progress=False)['Close'].iloc[-1]
-        for name, ticker in tickers_map.items():
-            try:
-                if ticker not in df: continue
-                price = float(df[ticker])
-                if math.isnan(price): continue
-                
-                # Conversão manual BTC para BRL se necessário
-                if name == "Bitcoin" and currency == "BRL":
-                    dolar = float(df.get("BRL=X", 5.80))
-                    price = price * dolar
-                
-                data.append({ "name": name, "ticker": ticker, "price": price, "currency": currency })
-            except: continue
-    except: pass
-    return data
+@app.post("/api/portfolio/add", response_model=schemas.TransactionResponse)
+def add_asset(transaction: schemas.TransactionCreate, db: Session = Depends(get_db)):
+    db_transaction = models.Transaction(**transaction.dict())
+    db.add(db_transaction)
+    db.commit()
+    db.refresh(db_transaction)
+    return db_transaction
