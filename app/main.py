@@ -348,114 +348,151 @@ def get_market_summary(currency: str = "BRL"):
 @app.post("/api/simulation")
 def simulate_future(data: schemas.SimulationRequest):
     """
-    Rota Inteligente:
-    - Se vier 'symbol', faz Backtest Real (Histórico).
-    - Se vier 'interest_rate_yearly', faz Projeção Futura (Juros Compostos).
+    Rota Híbrida Blindada:
+    - Se vier 'symbol': Faz Backtest Real (Yahoo Finance) com dividendos e aportes.
+    - Se NÃO vier 'symbol': Faz Projeção Futura (Matemática Juros Compostos).
     """
     
-    # === MODO 1: BACKTEST REAL (COM ATIVOS REAIS) ===
+    # ====================================================
+    # MODO 1: BACKTEST REAL (Com Histórico do Yahoo Finance)
+    # ====================================================
     if data.symbol:
         try:
-            # Garante sufixo correto (.SA para BR, nada para EUA)
-            ticker = data.symbol.upper()
-            if data.currency == "BRL" and not ticker.endswith(".SA") and len(ticker) > 4:
+            # 1. Tratamento do Ticker (Sufixo .SA para Brasil)
+            ticker = data.symbol.upper().strip()
+            # Se for BRL e não tiver .SA e não for cripto (ex: BTC-USD), adiciona .SA
+            if data.currency == "BRL" and not ticker.endswith(".SA") and "-" not in ticker:
                  ticker += ".SA"
             
-            # Baixa dados históricos (Dividendos + Preço)
+            # 2. Definição da Data de Início
+            # Se o usuário não mandou data, usamos 5 anos atrás como padrão
+            start_date = data.start_date if data.start_date else "2020-01-01"
+            
+            # 3. Baixar Dados (Preço + Dividendos)
+            # auto_adjust=False é CRUCIAL para recebermos a coluna 'Dividends' separada
             stock = yf.Ticker(ticker)
-            # Pega histórico desde a data de início
-            hist = stock.history(start=data.start_date, auto_adjust=False) # auto_adjust=False para pegar dividendos separados
+            hist = stock.history(start=start_date, auto_adjust=False)
             
             if hist.empty:
-                raise HTTPException(status_code=404, detail=f"Sem dados para {ticker} nesta data.")
+                # Tentativa de fallback: Se a data específica falhar, pega os últimos 5 anos
+                hist = stock.history(period="5y", auto_adjust=False)
+                if hist.empty:
+                     raise HTTPException(status_code=404, detail=f"Não foram encontrados dados históricos para o ativo {ticker}.")
 
-            # Inicializa variáveis
+            # 4. Inicialização das Variáveis da Simulação
             shares = 0
-            cash = data.initial_investment or 0
-            total_invested = data.initial_investment or 0
+            # O caixa começa com o investimento inicial
+            cash = float(data.initial_investment or 0)
+            total_invested = float(data.initial_investment or 0)
+            monthly_contribution = float(data.monthly_contribution or 0)
+            
             history = []
+            last_month_processed = -1
             
-            # Percorre dia a dia (Simplificado: Compra no fechamento)
-            # Para ficar rápido, vamos iterar mensalmente (resample) ou linha a linha se for curto
-            # Aqui faremos linha a linha para precisão dos dividendos
-            
+            # 5. Loop Dia a Dia (Simulação Temporal)
             for date, row in hist.iterrows():
-                price = row['Close']
-                divs = row['Dividends'] if 'Dividends' in row else 0
+                # Garante que os valores são float para evitar erros de cálculo
+                price = float(row['Close'])
+                divs = float(row['Dividends']) if 'Dividends' in row else 0.0
                 
-                # 1. Recebe Dividendos (Se tiver ações)
+                # A. RECEBIMENTO DE DIVIDENDOS
+                # Se tiver ações e houver dividendos no dia, cai na conta
                 if shares > 0 and divs > 0:
                     earned = shares * divs
                     if data.reinvest_dividends:
-                        cash += earned # Cai no caixa para comprar mais
+                        cash += earned
                 
-                # 2. Aporte Mensal (Simplificação: Todo dia 1 ou próximo)
-                if date.day <= 5: # Simula aporte no começo do mês
-                    # Lógica simples: Evita aportar todo dia, apenas uma vez por mes
-                    # (Para produção precisaria de controle melhor de "já aportou esse mês")
-                    pass 
+                # B. APORTE MENSAL (Apenas na virada de mês)
+                # Verifica se mudou o mês em relação ao último processado
+                if date.month != last_month_processed:
+                    # Se não for o primeiro mês absoluto (para não duplicar com inicial), aporta
+                    if last_month_processed != -1: 
+                        cash += monthly_contribution
+                        total_invested += monthly_contribution
+                    last_month_processed = date.month
                 
-                # Vamos simplificar: Aporte + Reinvestimento acontece AGORA
-                # Compra o máximo de ações possível com o caixa disponível
-                if cash > price:
-                    new_shares = cash // price
-                    cost = new_shares * price
-                    shares += new_shares
-                    cash -= cost
+                # C. COMPRA DE AÇÕES (Reinvestimento Automático)
+                # Se tiver caixa suficiente para comprar pelo menos 1 ação
+                if cash >= price and price > 0:
+                    can_buy = int(cash // price) # Parte inteira da divisão
+                    if can_buy > 0:
+                        cost = can_buy * price
+                        shares += can_buy
+                        cash -= cost # Desconta do caixa
                 
-                # Grava histórico (apenas fim de mês para o gráfico não travar)
+                # D. GRAVAÇÃO DO HISTÓRICO (Apenas no último dia de cada mês)
+                # Isso evita enviar milhares de dias para o frontend e deixa o gráfico leve
                 if date.is_month_end:
                     total_equity = (shares * price) + cash
+                    current_profit = total_equity - total_invested
+                    
                     history.append({
-                        "month": date.strftime("%Y-%m"),
-                        "invested": round(total_invested, 2), # (Nota: A lógica de invested precisa somar aportes mensais reais)
+                        "month": date.strftime("%Y-%m"), # Ex: "2023-05"
+                        "invested": round(total_invested, 2),
                         "total": round(total_equity, 2),
+                        "interest": round(current_profit, 2), # O CAMPO QUE FALTAVA!
                         "price": round(price, 2)
                     })
             
-            # Resultado Final
-            final_price = hist['Close'].iloc[-1]
+            # 6. Fechamento Final (Último dia disponível)
+            final_price = float(hist['Close'].iloc[-1])
             final_equity = (shares * final_price) + cash
-            
+            total_profit = final_equity - total_invested
+
             return {
                 "mode": "backtest",
                 "symbol": ticker,
                 "final_total": round(final_equity, 2),
-                "total_invested": round(total_invested, 2), # Precisa refinar lógica de soma mensal
+                "total_invested": round(total_invested, 2),
+                "total_interest": round(total_profit, 2), # CORREÇÃO CONFIRMADA AQUI
                 "history": history
             }
 
         except Exception as e:
-            print(f"Erro Backtest: {e}")
-            raise HTTPException(status_code=400, detail=str(e))
+            print(f"Erro Crítico no Backtest: {e}")
+            # Retorna erro 400 para o frontend mostrar o alerta amigável
+            raise HTTPException(status_code=400, detail=f"Erro ao processar simulação para {data.symbol}: {str(e)}")
 
-    # === MODO 2: SIMULAÇÃO MATEMÁTICA (FUTURO) ===
-    # (Este é o código que já funcionava)
+    # ====================================================
+    # MODO 2: SIMULAÇÃO MATEMÁTICA (Juros Compostos)
+    # ====================================================
     else:
-        # Previne erro se campos estiverem vazios
-        initial = data.initial_amount or 0
-        years = data.years or 1
-        rate = data.interest_rate_yearly or 10
-        monthly_contribution = data.monthly_contribution or 0
+        # Valores padrão seguros para evitar crash matemático
+        initial = float(data.initial_amount or 0)
+        years = int(data.years or 1)
+        rate = float(data.interest_rate_yearly or 10)
+        monthly_contribution = float(data.monthly_contribution or 0)
 
         months = years * 12
+        # Taxa mensal equivalente
         monthly_rate = (1 + (rate / 100))**(1/12) - 1
         
         current_total = initial
         total_invested = initial
         history = []
         
-        history.append({"month": 0, "invested": round(total_invested, 2), "total": round(current_total, 2)})
+        # Ponto Zero (Início)
+        history.append({
+            "month": "Início", 
+            "invested": round(total_invested, 2), 
+            "total": round(current_total, 2),
+            "interest": 0.0
+        })
 
         for m in range(1, months + 1):
+            # 1. Rendimento do mês
             yield_amount = current_total * monthly_rate
             current_total += yield_amount
             
+            # 2. Aporte do mês
             current_total += monthly_contribution
             total_invested += monthly_contribution
             
+            # 3. Grava histórico
+            # Se for muito longo (> 5 anos), grava trimestralmente para otimizar? 
+            # Por enquanto, mantemos mensal para suavidade do gráfico.
             history.append({
-                "month": m,
+                "month": f"Mês {m}",
                 "invested": round(total_invested, 2),
                 "total": round(current_total, 2),
                 "interest": round(current_total - total_invested, 2)
