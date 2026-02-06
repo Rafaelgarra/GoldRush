@@ -71,7 +71,15 @@ class AssetResponse(AssetCreate):
         from_attributes = True
 
 class SimulationRequest(BaseModel):
-    initial_amount: float
-    monthly_contribution: float
-    interest_rate_yearly: float
-    years: int
+    # --- MODO 1: Simulação Matemática Simples ---
+    initial_amount: Optional[float] = None
+    interest_rate_yearly: Optional[float] = None
+    years: Optional[int] = None
+
+    # --- MODO 2: Backtest Real (O que deu erro) ---
+    symbol: Optional[str] = None
+    initial_investment: Optional[float] = None
+    monthly_contribution: float = 0
+    start_date: Optional[str] = None
+    reinvest_dividends: bool = True
+    currency: str = "BRL"
