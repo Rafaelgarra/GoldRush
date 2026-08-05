@@ -442,6 +442,124 @@ def get_portfolio_prices(
     return prices
 
 
+@app.get("/api/portfolio/summary")
+def get_portfolio_summary(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Retorna os ativos da carteira com preço atual e variação diária (para top gainers/losers).
+    """
+    assets = db.query(models.Asset).filter(models.Asset.owner_id == current_user.id).all()
+    if not assets:
+        return {"assets": [], "top_gainer": None, "top_loser": None}
+
+    symbols = list(set([a.symbol for a in assets]))
+    prices = fetch_prices(symbols, db)
+    
+    changes = {}
+    try:
+        import yfinance as yf
+        df = yf.download(symbols, period="5d", auto_adjust=True, progress=False)
+        closes = df["Close"] if len(symbols) > 1 else df[["Close"]]
+        if len(symbols) == 1:
+            closes.columns = symbols
+            
+        for sym in symbols:
+            if sym in closes:
+                col = closes[sym].dropna()
+                if len(col) >= 2:
+                    prev_close = float(col.iloc[-2])
+                    curr_close = float(col.iloc[-1])
+                    change_pct = ((curr_close - prev_close) / prev_close) * 100
+                    changes[sym] = round(change_pct, 2)
+    except Exception as e:
+        print(f"Erro ao buscar changes no summary: {e}")
+
+    enriched = []
+    for a in assets:
+        enriched.append({
+            "symbol": a.symbol,
+            "quantity": a.quantity,
+            "price_paid": float(a.price_paid),
+            "current_price": float(prices.get(a.symbol, a.price_paid)),
+            "change_percent": changes.get(a.symbol, 0.0),
+        })
+        
+    valid_changes = [a for a in enriched if a["change_percent"] != 0.0]
+    sorted_by_change = sorted(valid_changes, key=lambda x: x["change_percent"])
+    
+    top_loser = sorted_by_change[0] if sorted_by_change else None
+    top_gainer = sorted_by_change[-1] if sorted_by_change else None
+    if top_gainer and top_loser and top_gainer["symbol"] == top_loser["symbol"]:
+        if top_gainer["change_percent"] > 0:
+            top_loser = None
+        else:
+            top_gainer = None
+
+    return {
+        "assets": enriched,
+        "top_gainer": top_gainer,
+        "top_loser": top_loser,
+    }
+
+@app.get("/api/portfolio/history")
+def get_portfolio_history(
+    period: str = "1y",
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Retorna a evolução patrimonial real dos ativos cadastrados.
+    """
+    from collections import defaultdict
+    import pandas as pd
+    import yfinance as yf
+    
+    assets = db.query(models.Asset).filter(models.Asset.owner_id == current_user.id).all()
+    if not assets:
+        return []
+
+    monthly_data = defaultdict(float)
+    total_invested_data = defaultdict(float)
+    symbols = list(set([a.symbol for a in assets]))
+    
+    try:
+        df = yf.download(symbols, period=period, interval="1mo", auto_adjust=True, progress=False)
+        closes = df["Close"] if len(symbols) > 1 else df[["Close"]]
+        if len(symbols) == 1:
+            closes.columns = symbols
+            
+        for date_idx, row in closes.iterrows():
+            month_str = date_idx.strftime("%Y-%m")
+            month_total = 0.0
+            month_invested = 0.0
+            
+            for asset in assets:
+                price = row[asset.symbol] if asset.symbol in row else None
+                if price and not pd.isna(price):
+                    month_total += price * asset.quantity
+                    month_invested += float(asset.price_paid) * asset.quantity
+                    
+            if month_total > 0:
+                monthly_data[month_str] = round(month_total, 2)
+                total_invested_data[month_str] = round(month_invested, 2)
+                
+    except Exception as e:
+        print(f"Error fetching portfolio history: {e}")
+        return []
+
+    result = []
+    for m in sorted(monthly_data.keys()):
+        result.append({
+            "month": m,
+            "total": monthly_data[m],
+            "invested": total_invested_data[m]
+        })
+        
+    return result
+
+
 @app.get("/api/price/{ticker}/history")
 def get_price_history(
     ticker: str,
