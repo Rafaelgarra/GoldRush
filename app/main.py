@@ -579,6 +579,7 @@ def simulate_future(data: schemas.SimulationRequest):
         monthly_contribution = float(data.monthly_contribution or 0)
         total_dividends = 0.0
         current_month_dividends = 0.0
+        current_month_dps = 0.0
         history = []
         last_month_processed = -1
         
@@ -598,9 +599,11 @@ def simulate_future(data: schemas.SimulationRequest):
                         "total": round((shares * last_price) + cash, 2),
                         "price": round(last_price, 2),
                         "accumulated_dividends": round(total_dividends, 2),
-                        "monthly_dividends": round(current_month_dividends, 2)
+                        "monthly_dividends": round(current_month_dividends, 2),
+                        "monthly_dividend_per_share": round(current_month_dps, 4)
                     })
                     current_month_dividends = 0.0
+                    current_month_dps = 0.0
                     
                     cash += monthly_contribution
                     total_invested += monthly_contribution
@@ -610,6 +613,7 @@ def simulate_future(data: schemas.SimulationRequest):
                 dividend_payout = shares * divs
                 total_dividends += dividend_payout
                 current_month_dividends += dividend_payout
+                current_month_dps += divs
                 if data.reinvest_dividends:
                     cash += dividend_payout
 
@@ -630,7 +634,8 @@ def simulate_future(data: schemas.SimulationRequest):
                 "total": round((shares * last_price) + cash, 2),
                 "price": round(last_price, 2),
                 "accumulated_dividends": round(total_dividends, 2),
-                "monthly_dividends": round(current_month_dividends, 2)
+                "monthly_dividends": round(current_month_dividends, 2),
+                "monthly_dividend_per_share": round(current_month_dps, 4)
             })
 
         final_price = float(hist["Close"].iloc[-1])
