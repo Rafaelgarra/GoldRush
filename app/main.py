@@ -610,6 +610,7 @@ def simulate_future(data: schemas.SimulationRequest):
                     "invested": round(total_invested, 2),
                     "total": round(total_equity, 2),
                     "price": round(price, 2),
+                    "accumulated_dividends": round(total_dividends, 2)
                 })
 
         final_price = float(hist["Close"].iloc[-1])

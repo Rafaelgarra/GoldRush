@@ -84,6 +84,7 @@ class SimulationHistoryPoint(BaseModel):
     invested: float
     total: float
     price: float
+    accumulated_dividends: float = 0.0
 
 
 class SimulationResponse(BaseModel):
