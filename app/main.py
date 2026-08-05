@@ -455,7 +455,19 @@ def get_portfolio_summary(
         return {"assets": [], "top_gainer": None, "top_loser": None}
 
     symbols = list(set([a.symbol for a in assets]))
-    prices = fetch_prices(symbols, db)
+    
+    # Adicionando moedas para buscar as cotações
+    currency_tickers = ["BRL=X", "EURBRL=X", "JPYBRL=X", "CNYBRL=X"]
+    all_symbols_to_fetch = symbols + currency_tickers
+    prices = fetch_prices(all_symbols_to_fetch, db)
+    
+    rates = {
+        "USD": prices.get("BRL=X", 5.8),
+        "EUR": prices.get("EURBRL=X", 6.2),
+        "JPY": prices.get("JPYBRL=X", 0.04),
+        "CNY": prices.get("CNYBRL=X", 0.8),
+        "BRL": 1.0
+    }
     
     changes = {}
     try:
@@ -501,6 +513,7 @@ def get_portfolio_summary(
         "assets": enriched,
         "top_gainer": top_gainer,
         "top_loser": top_loser,
+        "rates": rates
     }
 
 @app.get("/api/portfolio/history")
