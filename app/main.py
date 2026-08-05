@@ -523,12 +523,17 @@ def get_portfolio_history(
     monthly_data = defaultdict(float)
     total_invested_data = defaultdict(float)
     symbols = list(set([a.symbol for a in assets]))
+    benchmarks = ["^BVSP", "^GSPC", "^IXIC"]
+    
+    # Dicionários para benchmarks
+    bench_raw = {b: defaultdict(float) for b in benchmarks}
     
     try:
-        df = yf.download(symbols, period=period, interval="1mo", auto_adjust=True, progress=False)
-        closes = df["Close"] if len(symbols) > 1 else df[["Close"]]
-        if len(symbols) == 1:
-            closes.columns = symbols
+        all_symbols = symbols + benchmarks
+        df = yf.download(all_symbols, period=period, interval="1mo", auto_adjust=True, progress=False)
+        closes = df["Close"] if len(all_symbols) > 1 else df[["Close"]]
+        if len(all_symbols) == 1:
+            closes.columns = all_symbols
             
         for date_idx, row in closes.iterrows():
             month_str = date_idx.strftime("%Y-%m")
@@ -545,17 +550,47 @@ def get_portfolio_history(
                 monthly_data[month_str] = round(month_total, 2)
                 total_invested_data[month_str] = round(month_invested, 2)
                 
+            # Guarda os preços crus dos benchmarks
+            for b in benchmarks:
+                b_price = row[b] if b in row else None
+                if b_price and not pd.isna(b_price):
+                    bench_raw[b][month_str] = float(b_price)
+                
     except Exception as e:
         print(f"Error fetching portfolio history: {e}")
         return []
 
     result = []
-    for m in sorted(monthly_data.keys()):
-        result.append({
+    sorted_months = sorted(monthly_data.keys())
+    
+    # Calculando os multiplicadores para normalizar os benchmarks ao portfolio total inicial
+    multipliers = {}
+    if sorted_months:
+        first_month = sorted_months[0]
+        initial_portfolio_value = monthly_data[first_month]
+        for b in benchmarks:
+            initial_b_price = bench_raw[b].get(first_month)
+            if initial_b_price and initial_b_price > 0:
+                multipliers[b] = initial_portfolio_value / initial_b_price
+            else:
+                multipliers[b] = 0
+
+    for m in sorted_months:
+        point = {
             "month": m,
             "total": monthly_data[m],
             "invested": total_invested_data[m]
-        })
+        }
+        
+        # Adiciona benchmarks normalizados
+        if multipliers["^BVSP"] > 0 and m in bench_raw["^BVSP"]:
+            point["ibov"] = round(bench_raw["^BVSP"][m] * multipliers["^BVSP"], 2)
+        if multipliers["^GSPC"] > 0 and m in bench_raw["^GSPC"]:
+            point["sp500"] = round(bench_raw["^GSPC"][m] * multipliers["^GSPC"], 2)
+        if multipliers["^IXIC"] > 0 and m in bench_raw["^IXIC"]:
+            point["nasdaq"] = round(bench_raw["^IXIC"][m] * multipliers["^IXIC"], 2)
+            
+        result.append(point)
         
     return result
 
