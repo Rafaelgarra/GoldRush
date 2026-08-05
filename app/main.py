@@ -490,13 +490,18 @@ def get_portfolio_summary(
 
     enriched = []
     for a in assets:
-        enriched.append({
-            "symbol": a.symbol,
-            "quantity": a.quantity,
-            "price_paid": float(a.price_paid),
-            "current_price": float(prices.get(a.symbol, a.price_paid)),
-            "change_percent": changes.get(a.symbol, 0.0),
-        })
+        try:
+            qtd = float(security.decrypt_data(a.quantity_enc))
+            price_paid = float(security.decrypt_data(a.price_paid_enc))
+            enriched.append({
+                "symbol": a.symbol,
+                "quantity": qtd,
+                "price_paid": price_paid,
+                "current_price": float(prices.get(a.symbol, price_paid)),
+                "change_percent": changes.get(a.symbol, 0.0),
+            })
+        except:
+            pass
         
     valid_changes = [a for a in enriched if a["change_percent"] != 0.0]
     sorted_by_change = sorted(valid_changes, key=lambda x: x["change_percent"])
@@ -533,9 +538,23 @@ def get_portfolio_history(
     if not assets:
         return []
 
+    # Decrypt assets beforehand to avoid doing it repeatedly in loops
+    decrypted_assets = []
+    for a in assets:
+        try:
+            qtd = float(security.decrypt_data(a.quantity_enc))
+            price = float(security.decrypt_data(a.price_paid_enc))
+            decrypted_assets.append({
+                "symbol": a.symbol,
+                "quantity": qtd,
+                "price_paid": price
+            })
+        except:
+            pass
+
     monthly_data = defaultdict(float)
     total_invested_data = defaultdict(float)
-    symbols = list(set([a.symbol for a in assets]))
+    symbols = list(set([a["symbol"] for a in decrypted_assets]))
     benchmarks = ["^BVSP", "^GSPC", "^IXIC"]
     
     # Dicionários para benchmarks
@@ -553,11 +572,11 @@ def get_portfolio_history(
             month_total = 0.0
             month_invested = 0.0
             
-            for asset in assets:
-                price = row[asset.symbol] if asset.symbol in row else None
+            for asset in decrypted_assets:
+                price = row[asset["symbol"]] if asset["symbol"] in row else None
                 if price and not pd.isna(price):
-                    month_total += price * asset.quantity
-                    month_invested += float(asset.price_paid) * asset.quantity
+                    month_total += price * asset["quantity"]
+                    month_invested += asset["price_paid"] * asset["quantity"]
                     
             if month_total > 0:
                 monthly_data[month_str] = round(month_total, 2)
