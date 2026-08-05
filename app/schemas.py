@@ -92,6 +92,7 @@ class SimulationResponse(BaseModel):
     final_portfolio_value: float
     final_accumulated_shares: float
     final_unit_price: float
+    total_dividends: float = 0.0
     history: List[SimulationHistoryPoint]
 
 

@@ -577,6 +577,7 @@ def simulate_future(data: schemas.SimulationRequest):
         cash = float(data.initial_investment or 0)
         total_invested = float(data.initial_investment or 0)
         monthly_contribution = float(data.monthly_contribution or 0)
+        total_dividends = 0.0
         history = []
         last_month_processed = -1
 
@@ -584,8 +585,11 @@ def simulate_future(data: schemas.SimulationRequest):
             price = float(row["Close"])
             divs = float(row["Dividends"]) if "Dividends" in row else 0.0
 
-            if shares > 0 and divs > 0 and data.reinvest_dividends:
-                cash += shares * divs
+            if shares > 0 and divs > 0:
+                dividend_payout = shares * divs
+                total_dividends += dividend_payout
+                if data.reinvest_dividends:
+                    cash += dividend_payout
 
             if date_idx.month != last_month_processed:
                 if last_month_processed != -1:
@@ -617,6 +621,7 @@ def simulate_future(data: schemas.SimulationRequest):
             "final_portfolio_value": round(final_equity, 2),
             "final_unit_price": round(final_price, 2),
             "final_accumulated_shares": round(shares, 2),
+            "total_dividends": round(total_dividends, 2),
             "history": history,
         }
 
