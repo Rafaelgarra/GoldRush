@@ -87,6 +87,7 @@ class SimulationHistoryPoint(BaseModel):
     accumulated_dividends: float = 0.0
     monthly_dividends: float = 0.0
     monthly_dividend_per_share: float = 0.0
+    accumulated_shares: float = 0.0
 
 
 class SimulationResponse(BaseModel):

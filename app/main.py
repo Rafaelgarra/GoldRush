@@ -600,7 +600,8 @@ def simulate_future(data: schemas.SimulationRequest):
                         "price": round(last_price, 2),
                         "accumulated_dividends": round(total_dividends, 2),
                         "monthly_dividends": round(current_month_dividends, 2),
-                        "monthly_dividend_per_share": round(current_month_dps, 4)
+                        "monthly_dividend_per_share": round(current_month_dps, 4),
+                        "accumulated_shares": round(shares, 2)
                     })
                     current_month_dividends = 0.0
                     current_month_dps = 0.0
@@ -635,7 +636,8 @@ def simulate_future(data: schemas.SimulationRequest):
                 "price": round(last_price, 2),
                 "accumulated_dividends": round(total_dividends, 2),
                 "monthly_dividends": round(current_month_dividends, 2),
-                "monthly_dividend_per_share": round(current_month_dps, 4)
+                "monthly_dividend_per_share": round(current_month_dps, 4),
+                "accumulated_shares": round(shares, 2)
             })
 
         final_price = float(hist["Close"].iloc[-1])
