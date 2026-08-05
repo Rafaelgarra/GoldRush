@@ -578,40 +578,60 @@ def simulate_future(data: schemas.SimulationRequest):
         total_invested = float(data.initial_investment or 0)
         monthly_contribution = float(data.monthly_contribution or 0)
         total_dividends = 0.0
+        current_month_dividends = 0.0
         history = []
         last_month_processed = -1
+        
+        last_date = None
+        last_price = 0.0
 
         for date_idx, row in hist.iterrows():
             price = float(row["Close"])
             divs = float(row["Dividends"]) if "Dividends" in row else 0.0
+            
+            if date_idx.month != last_month_processed:
+                if last_month_processed != -1 and last_date is not None:
+                    # Salva o estado do final do mes anterior
+                    history.append({
+                        "month": last_date.strftime("%Y-%m"),
+                        "invested": round(total_invested, 2),
+                        "total": round((shares * last_price) + cash, 2),
+                        "price": round(last_price, 2),
+                        "accumulated_dividends": round(total_dividends, 2),
+                        "monthly_dividends": round(current_month_dividends, 2)
+                    })
+                    current_month_dividends = 0.0
+                    
+                    cash += monthly_contribution
+                    total_invested += monthly_contribution
+                last_month_processed = date_idx.month
 
             if shares > 0 and divs > 0:
                 dividend_payout = shares * divs
                 total_dividends += dividend_payout
+                current_month_dividends += dividend_payout
                 if data.reinvest_dividends:
                     cash += dividend_payout
-
-            if date_idx.month != last_month_processed:
-                if last_month_processed != -1:
-                    cash += monthly_contribution
-                    total_invested += monthly_contribution
-                last_month_processed = date_idx.month
 
             if cash >= price and price > 0:
                 can_buy = int(cash // price)
                 if can_buy > 0:
                     shares += can_buy
                     cash -= can_buy * price
+                    
+            last_date = date_idx
+            last_price = price
 
-            if date_idx.is_month_end:
-                total_equity = (shares * price) + cash
-                history.append({
-                    "month": date_idx.strftime("%Y-%m"),
-                    "invested": round(total_invested, 2),
-                    "total": round(total_equity, 2),
-                    "price": round(price, 2),
-                    "accumulated_dividends": round(total_dividends, 2)
-                })
+        # Append o ultimo mes que ficou faltando
+        if last_month_processed != -1 and last_date is not None:
+            history.append({
+                "month": last_date.strftime("%Y-%m"),
+                "invested": round(total_invested, 2),
+                "total": round((shares * last_price) + cash, 2),
+                "price": round(last_price, 2),
+                "accumulated_dividends": round(total_dividends, 2),
+                "monthly_dividends": round(current_month_dividends, 2)
+            })
 
         final_price = float(hist["Close"].iloc[-1])
         final_equity = (shares * final_price) + cash
