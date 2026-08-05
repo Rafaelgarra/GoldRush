@@ -76,7 +76,6 @@ packaging==25.0
 pandas==2.3.2
 passlib==1.7.4
 apscheduler==3.10.4
-MetaTrader5==5.0.4424
 requests-cache==1.2.1
 peewee==3.19.0
 pefile==2024.8.26
