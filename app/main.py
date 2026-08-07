@@ -547,7 +547,8 @@ def get_portfolio_history(
             decrypted_assets.append({
                 "symbol": a.symbol,
                 "quantity": qtd,
-                "price_paid": price
+                "price_paid": price,
+                "currency": a.currency
             })
         except:
             pass
@@ -562,6 +563,9 @@ def get_portfolio_history(
     
     try:
         all_symbols = symbols + benchmarks
+        if "BRL=X" not in all_symbols:
+            all_symbols.append("BRL=X")
+            
         df = yf.download(all_symbols, period=period, interval="1mo", auto_adjust=True, progress=False)
         closes = df["Close"] if len(all_symbols) > 1 else df[["Close"]]
         if len(all_symbols) == 1:
@@ -572,11 +576,14 @@ def get_portfolio_history(
             month_total = 0.0
             month_invested = 0.0
             
+            usd_rate = row["BRL=X"] if "BRL=X" in row and not pd.isna(row["BRL=X"]) else 5.80
+            
             for asset in decrypted_assets:
                 price = row[asset["symbol"]] if asset["symbol"] in row else None
                 if price and not pd.isna(price):
-                    month_total += price * asset["quantity"]
-                    month_invested += asset["price_paid"] * asset["quantity"]
+                    multiplier = usd_rate if asset.get("currency") == "USD" else 1.0
+                    month_total += price * asset["quantity"] * multiplier
+                    month_invested += asset["price_paid"] * asset["quantity"] * multiplier
                     
             if month_total > 0:
                 monthly_data[month_str] = round(month_total, 2)
