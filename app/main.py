@@ -985,3 +985,158 @@ def api_status():
 def cache_info(current_user: models.User = Depends(get_current_user)):
     """Retorna estado atual do cache in-memory (debug)."""
     return get_cache_info()
+
+# =======================
+# 🤖 INTELIGÊNCIA ARTIFICIAL (GEMINI)
+# =======================
+
+@app.get("/api/ai/analyze", response_model=schemas.AIAnalysisResponse)
+def analyze_portfolio_ai(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    import os
+    import json
+    import google.generativeai as genai
+
+    # 1. Checa a chave da API
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="Chave do Gemini não configurada no servidor.")
+        
+    genai.configure(api_key=api_key)
+
+    # 2. Busca dados da carteira
+    assets = db.query(models.Asset).filter(models.Asset.owner_id == current_user.id).all()
+    if not assets:
+        raise HTTPException(status_code=400, detail="Carteira vazia, nada para analisar.")
+        
+    decrypted_assets = []
+    for a in assets:
+        try:
+            qtd = float(security.decrypt_data(a.quantity_enc))
+            price = float(security.decrypt_data(a.price_paid_enc))
+            decrypted_assets.append({
+                "symbol": a.symbol,
+                "quantity": qtd,
+                "price_paid": price,
+                "currency": a.currency
+            })
+        except:
+            pass
+
+    symbols = [a["symbol"] for a in decrypted_assets]
+    prices = fetch_prices(symbols, db)
+    
+    # Busca summary real 
+    total_invested = 0
+    total_current = 0
+    portfolio_details = []
+    
+    for a in decrypted_assets:
+        sym = a["symbol"]
+        curr_price = prices.get(sym) or a["price_paid"]
+        
+        invested = a["quantity"] * a["price_paid"]
+        current = a["quantity"] * curr_price
+        
+        total_invested += invested
+        total_current += current
+        
+        portfolio_details.append({
+            "symbol": sym,
+            "quantity": a["quantity"],
+            "avg_price": a["price_paid"],
+            "current_price": curr_price,
+            "profit_pct": ((current - invested) / invested) * 100 if invested > 0 else 0
+        })
+
+    # Calcula peso de cada ativo
+    for p in portfolio_details:
+        p["weight_pct"] = ( (p["quantity"] * p["current_price"]) / total_current ) * 100 if total_current > 0 else 0
+
+    # 3. Busca noticias recentes dos ativos
+    import yfinance as yf
+    from datetime import datetime, timedelta, timezone
+    
+    cutoff = datetime.now(timezone.utc) - timedelta(days=5)
+    news_dossier = {}
+    
+    for sym in symbols:
+        try:
+            ticker = yf.Ticker(sym)
+            news_list = []
+            for n in ticker.news:
+                content = n.get("content", {})
+                if not content:
+                    content = n if "title" in n else {}
+                if not content: continue
+                
+                pub_date_str = content.get("pubDate", "")
+                if pub_date_str:
+                    try:
+                        pub_date = datetime.fromisoformat(pub_date_str.replace('Z', '+00:00'))
+                        if pub_date < cutoff: continue
+                    except:
+                        pass
+                news_list.append(content.get("title", ""))
+            news_dossier[sym] = news_list[:3] # Top 3 noticias por ativo
+        except:
+            pass
+
+    # 4. Constrói o Prompt
+    prompt = f"""
+Você é um consultor financeiro sênior de Wealth Management, altamente especializado, racional e focado em proteção de capital e geração de valor a longo prazo (value investing).
+Sua missão é analisar a seguinte carteira de investimentos e retornar recomendações sólidas.
+
+DADOS DA CARTEIRA:
+Total Investido: {total_invested:.2f}
+Total Atual: {total_current:.2f}
+Lucro/Prejuízo: {((total_current - total_invested) / total_invested)*100 if total_invested>0 else 0:.2f}%
+
+COMPOSIÇÃO:
+"""
+    for p in portfolio_details:
+        prompt += f"- {p['symbol']}: Peso na carteira {p['weight_pct']:.1f}%. Preço médio: {p['avg_price']:.2f}. Preço atual: {p['current_price']:.2f}. Rentabilidade: {p['profit_pct']:.1f}%.\n"
+
+    prompt += "\nNOTÍCIAS RECENTES (ÚLTIMOS 5 DIAS):\n"
+    for sym, news in news_dossier.items():
+        if news:
+            prompt += f"- {sym}: " + " | ".join(news) + "\n"
+
+    prompt += """
+TAREFA:
+Analise esses dados e emita um relatório estruturado no seguinte formato JSON (responda APENAS o JSON, nada mais, usando exatamente estas chaves):
+{
+  "health_score": (int, nota de 0 a 100 baseada na diversificação, qualidade dos ativos e rentabilidade),
+  "market_comparison": (string, 1 paragrafo comparando a carteira com a macroeconomia atual e IBOV/SP500),
+  "risk_assessment": (string, 1 paragrafo analisando a exposição cambial, concentração em um ativo ou setor),
+  "dividend_analysis": (string, 1 paragrafo avaliando o potencial de dividendos desses ativos no longo prazo),
+  "assets_analysis": [
+    {
+      "symbol": (string),
+      "rating": (string, deve ser exatamente um destes: "Strong Buy", "Buy", "Hold", "Sell", "Strong Sell"),
+      "alert_flag": (string, um aviso curto caso haja algo grave nas notícias ou fundamentos ruins, ou null se estiver tudo bem),
+      "reasoning": (string, justificativa curta e direta em 1 frase para este ativo)
+    }
+  ],
+  "suggestions": [
+    (string, recomendação de um ticker novo para adicionar à carteira com justificativa),
+    (string, outra recomendação)
+  ]
+}
+"""
+
+    try:
+        model = genai.GenerativeModel("gemini-2.5-flash")
+        response = model.generate_content(
+            prompt,
+            generation_config=genai.GenerationConfig(
+                response_mime_type="application/json"
+            )
+        )
+        data = json.loads(response.text)
+        return data
+    except Exception as e:
+        print(f"Erro no Gemini: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao comunicar com a IA. Tente novamente mais tarde.")

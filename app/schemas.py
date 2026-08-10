@@ -118,3 +118,20 @@ class PriceSuggestion(BaseModel):
     current_price: float
     currency: Optional[str] = "BRL"
     timestamp: Optional[datetime] = None
+
+
+# ─── AI Advisor ──────────────────────────────────────────────
+
+class AssetAnalysis(BaseModel):
+    symbol: str
+    rating: str
+    alert_flag: Optional[str] = None
+    reasoning: str
+
+class AIAnalysisResponse(BaseModel):
+    health_score: int
+    market_comparison: str
+    risk_assessment: str
+    dividend_analysis: str
+    assets_analysis: List[AssetAnalysis]
+    suggestions: List[str]
