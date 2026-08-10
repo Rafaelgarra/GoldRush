@@ -49,6 +49,8 @@ class WatchlistCreate(BaseModel):
 class WatchlistResponse(WatchlistCreate):
     id: int
     added_at: datetime
+    price: Optional[float] = None
+    changePercent: Optional[float] = None
 
     class Config:
         from_attributes = True

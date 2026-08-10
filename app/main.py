@@ -329,7 +329,107 @@ def get_watchlist(
         .filter(models.Watchlist.user_id == current_user.id)
         .all()
     )
-    return items
+    if not items:
+        return []
+        
+    symbols = list(set([i.symbol for i in items]))
+    prices = fetch_prices(symbols, db)
+    
+    changes = {}
+    try:
+        import yfinance as yf
+        df = yf.download(symbols, period="5d", auto_adjust=True, progress=False)
+        closes = df["Close"] if len(symbols) > 1 else df[["Close"]]
+        if len(symbols) == 1:
+            closes.columns = symbols
+            
+        for sym in symbols:
+            if sym in closes:
+                col = closes[sym].dropna()
+                if len(col) >= 2:
+                    prev_close = float(col.iloc[-2])
+                    curr_close = float(col.iloc[-1])
+                    change_pct = ((curr_close - prev_close) / prev_close) * 100
+                    changes[sym] = round(change_pct, 2)
+    except Exception as e:
+        print(f"Erro ao buscar changes na watchlist: {e}")
+
+    result = []
+    for item in items:
+        resp = schemas.WatchlistResponse.model_validate(item)
+        resp.price = prices.get(item.symbol)
+        resp.changePercent = changes.get(item.symbol)
+        result.append(resp)
+        
+    return result
+
+@app.get("/api/watchlist/news")
+def get_watchlist_news(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Retorna as últimas notícias dos ativos monitorados.
+    """
+    items = (
+        db.query(models.Watchlist)
+        .filter(models.Watchlist.user_id == current_user.id)
+        .all()
+    )
+    if not items:
+        return []
+        
+    symbols = list(set([i.symbol for i in items]))
+    all_news = []
+    import yfinance as yf
+    
+    for sym in symbols:
+        try:
+            ticker = yf.Ticker(sym)
+            news = ticker.news
+            for n in news:
+                content = n.get("content", {})
+                if not content:
+                    if "title" in n:
+                        content = n
+                    else:
+                        continue
+                        
+                # Tenta pegar link de onde estiver
+                link = ""
+                if content.get("clickThroughUrl") and isinstance(content["clickThroughUrl"], dict):
+                    link = content["clickThroughUrl"].get("url", "")
+                if not link and content.get("canonicalUrl") and isinstance(content["canonicalUrl"], dict):
+                    link = content["canonicalUrl"].get("url", "")
+                    
+                provider = "Notícias"
+                if content.get("provider") and isinstance(content["provider"], dict):
+                    provider = content["provider"].get("displayName", "Notícias")
+
+                all_news.append({
+                    "symbol": sym,
+                    "title": content.get("title", ""),
+                    "summary": content.get("summary", ""),
+                    "pubDate": content.get("pubDate", ""),
+                    "link": link,
+                    "provider": provider,
+                })
+        except Exception as e:
+            print(f"Erro buscar news para {sym}: {e}")
+            
+    # sort by pubDate desc
+    all_news.sort(key=lambda x: x["pubDate"], reverse=True)
+    
+    # deduplicate by title
+    seen = set()
+    dedup = []
+    for n in all_news:
+        if n["title"] not in seen and n["title"]:
+            seen.add(n["title"])
+            dedup.append(n)
+            
+    return dedup[:15]
+
 
 
 @app.post("/api/watchlist", response_model=schemas.WatchlistResponse)
