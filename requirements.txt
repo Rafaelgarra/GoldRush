@@ -84,7 +84,7 @@ platformdirs==4.5.1
 plotly==6.5.0
 prompt_toolkit==3.0.51
 propcache==0.3.2
-protobuf==6.32.0
+protobuf
 psycopg2-binary==2.9.11
 pyaml==25.7.0
 pyarrow==22.0.0
