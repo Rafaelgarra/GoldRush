@@ -382,6 +382,9 @@ def get_watchlist_news(
     symbols = list(set([i.symbol for i in items]))
     all_news = []
     import yfinance as yf
+    from datetime import datetime, timedelta, timezone
+    
+    cutoff = datetime.now(timezone.utc) - timedelta(days=3)
     
     for sym in symbols:
         try:
@@ -394,6 +397,16 @@ def get_watchlist_news(
                         content = n
                     else:
                         continue
+                        
+                pub_date_str = content.get("pubDate", "")
+                if pub_date_str:
+                    try:
+                        # Ex: 2026-08-10T20:40:36Z
+                        pub_date = datetime.fromisoformat(pub_date_str.replace('Z', '+00:00'))
+                        if pub_date < cutoff:
+                            continue
+                    except:
+                        pass
                         
                 # Tenta pegar link de onde estiver
                 link = ""
@@ -410,7 +423,7 @@ def get_watchlist_news(
                     "symbol": sym,
                     "title": content.get("title", ""),
                     "summary": content.get("summary", ""),
-                    "pubDate": content.get("pubDate", ""),
+                    "pubDate": pub_date_str,
                     "link": link,
                     "provider": provider,
                 })
