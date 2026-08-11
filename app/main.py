@@ -1137,7 +1137,7 @@ Analise esses dados e emita um relatório estruturado no seguinte formato JSON (
 """
 
     try:
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-3.6-flash")
         response = model.generate_content(
             prompt,
             generation_config=genai.GenerationConfig(
