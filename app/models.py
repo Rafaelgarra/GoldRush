@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime, Float, BigInteger, Date, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime, Float, BigInteger, Date, UniqueConstraint, Text
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.database import Base
@@ -90,3 +90,16 @@ class PriceCache(Base):
     price = Column(Float, nullable=False)
     source = Column(String, default="yfinance")  # mt5 | yfinance | eod_collector
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class AIAnalysisCache(Base):
+    """
+    Persiste a última análise gerada pelo Gemini para cada usuário.
+    A análise é válida apenas no dia de criação (date_generated == hoje).
+    """
+    __tablename__ = "ai_analysis_cache"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True)
+    analysis_json = Column(Text, nullable=False)
+    date_generated = Column(Date, nullable=False, default=datetime.utcnow)

@@ -995,7 +995,27 @@ def cache_info(current_user: models.User = Depends(get_current_user)):
 # 🤖 INTELIGÊNCIA ARTIFICIAL (GEMINI)
 # =======================
 
-@app.get("/api/ai/analyze", response_model=schemas.AIAnalysisResponse)
+@app.get("/api/ai/cached", response_model=schemas.AIAnalysisResponse)
+def get_cached_ai_analysis(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Retorna a análise salva para hoje, se existir. 404 caso contrário."""
+    import json
+    from datetime import date as date_type
+
+    today = date_type.today()
+    cached = db.query(models.AIAnalysisCache).filter(
+        models.AIAnalysisCache.user_id == current_user.id
+    ).first()
+
+    if not cached or cached.date_generated != today:
+        raise HTTPException(status_code=404, detail="Nenhuma análise para hoje.")
+
+    return json.loads(cached.analysis_json)
+
+
+@app.post("/api/ai/analyze", response_model=schemas.AIAnalysisResponse)
 def analyze_portfolio_ai(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -1184,6 +1204,24 @@ Retorne no mínimo 3 trading_opportunities e 4 dividend_opportunities.
             )
         )
         data = json.loads(response.text)
+
+        # Persiste a análise no banco (upsert por usuário)
+        from datetime import date as date_type
+        today = date_type.today()
+        cached = db.query(models.AIAnalysisCache).filter(
+            models.AIAnalysisCache.user_id == current_user.id
+        ).first()
+        if cached:
+            cached.analysis_json = json.dumps(data, ensure_ascii=False)
+            cached.date_generated = today
+        else:
+            db.add(models.AIAnalysisCache(
+                user_id=current_user.id,
+                analysis_json=json.dumps(data, ensure_ascii=False),
+                date_generated=today,
+            ))
+        db.commit()
+
         return data
     except Exception as e:
         print(f"Erro no Gemini: {e}")
