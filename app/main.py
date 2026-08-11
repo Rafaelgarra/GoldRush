@@ -1094,46 +1094,82 @@ def analyze_portfolio_ai(
             pass
 
     # 4. Constrói o Prompt
-    prompt = f"""
-Você é um consultor financeiro sênior de Wealth Management, altamente especializado, racional e focado em proteção de capital e geração de valor a longo prazo (value investing).
-Sua missão é analisar a seguinte carteira de investimentos e retornar recomendações sólidas.
-
-DADOS DA CARTEIRA:
-Total Investido: {total_invested:.2f}
-Total Atual: {total_current:.2f}
-Lucro/Prejuízo: {((total_current - total_invested) / total_invested)*100 if total_invested>0 else 0:.2f}%
-
-COMPOSIÇÃO:
-"""
+    portfolio_lines = ""
     for p in portfolio_details:
-        prompt += f"- {p['symbol']}: Peso na carteira {p['weight_pct']:.1f}%. Preço médio: {p['avg_price']:.2f}. Preço atual: {p['current_price']:.2f}. Rentabilidade: {p['profit_pct']:.1f}%.\n"
+        portfolio_lines += f"- {p['symbol']}: Peso {p['weight_pct']:.1f}%, Preço médio R${p['avg_price']:.2f}, Preço atual R${p['current_price']:.2f}, Rentabilidade {p['profit_pct']:.1f}%\n"
 
-    prompt += "\nNOTÍCIAS RECENTES (ÚLTIMOS 5 DIAS):\n"
+    news_lines = ""
     for sym, news in news_dossier.items():
         if news:
-            prompt += f"- {sym}: " + " | ".join(news) + "\n"
+            news_lines += f"- {sym}: " + " | ".join(news) + "\n"
 
-    prompt += """
+    prompt = f"""Você é um analista financeiro sênior de nível institucional, especializado em Bolsa de Valores (B3, NYSE, NASDAQ), setores de Tecnologia, Agronegócio, Real Estate (FIIs), Energia e Utilities.
+Você é objetivo, direto e baseia suas análises em dados fundamentalistas e cenário macroeconômico.
+
+PERFIL DO INVESTIDOR:
+- Dividendos: Conservador a Arrojado — busca dividendos seguros e pulverizados em nichos estáveis (ex: energia, logística, saneamento), com Dividend Yield ACIMA de 11%
+- Trading/Especulação: Arrojado — aceita risco alto/muito alto se o potencial for de multiplicar o capital (3x ou mais). Quer saber as oportunidades mesmo que sejam apostas, para decidir por conta própria.
+- Decisão final: É SEMPRE do investidor. Apresente os dois lados (prós e contras) de forma honesta.
+
+CARTEIRA ATUAL (posições existentes para considerar no rebalanceamento):
+Total Investido: R${total_invested:.2f}
+Total Atual: R${total_current:.2f}
+Resultado: {((total_current - total_invested) / total_invested)*100 if total_invested > 0 else 0:.2f}%
+
+{portfolio_lines}
+
+NOTÍCIAS RECENTES DOS ATIVOS (últimos 5 dias):
+{news_lines if news_lines else "Nenhuma notícia relevante encontrada."}
+
 TAREFA:
-Analise esses dados e emita um relatório estruturado no seguinte formato JSON (responda APENAS o JSON, nada mais, usando exatamente estas chaves):
-{
-  "health_score": (int, nota de 0 a 100 baseada na diversificação, qualidade dos ativos e rentabilidade),
-  "market_comparison": (string, 1 paragrafo comparando a carteira com a macroeconomia atual e IBOV/SP500),
-  "risk_assessment": (string, 1 paragrafo analisando a exposição cambial, concentração em um ativo ou setor),
-  "dividend_analysis": (string, 1 paragrafo avaliando o potencial de dividendos desses ativos no longo prazo),
+Retorne APENAS um JSON válido, sem markdown, sem texto extra, com exatamente esta estrutura:
+{{
+  "health_score": (int 0-100: avalia diversificação, qualidade dos ativos, nível de risco e rentabilidade),
+  "market_comparison": (string: 1 parágrafo comparando a carteira com IBOV e S&P500 no cenário macro atual),
+  "risk_assessment": (string: 1 parágrafo sobre concentração setorial, exposição cambial, correlações e riscos sistêmicos),
+  "dividend_analysis": (string: 1 parágrafo analisando o potencial de dividendos dos ativos atuais),
   "assets_analysis": [
-    {
+    {{
       "symbol": (string),
-      "rating": (string, deve ser exatamente um destes: "Strong Buy", "Buy", "Hold", "Sell", "Strong Sell"),
-      "alert_flag": (string, um aviso curto caso haja algo grave nas notícias ou fundamentos ruins, ou null se estiver tudo bem),
-      "reasoning": (string, justificativa curta e direta em 1 frase para este ativo)
-    }
+      "rating": (exatamente um de: "Strong Buy", "Buy", "Hold", "Sell", "Strong Sell"),
+      "alert_flag": (string com aviso de risco grave ou fraude, ou null),
+      "reasoning": (string: justificativa direta e curta em 1 frase)
+    }}
   ],
+  "trading_opportunities": [
+    {{
+      "symbol": (string: ticker de oportunidade de preço — pode ser ação B3, BDR, ETF, cripto-ETF ou ação NYSE/NASDAQ com alto potencial especulativo),
+      "sector": (string: setor da empresa),
+      "current_price_ref": (string: preço de referência aproximado ex "R$12,50" ou "US$3.20"),
+      "target_price": (string: preço alvo em 12-24 meses ex "R$40,00"),
+      "upside_potential": (string: ex "220% de upside"),
+      "risk_level": (string: exatamente "Alto" ou "Muito Alto"),
+      "pros": (lista de 2 a 4 strings com os argumentos FAVORÁVEIS ao investimento),
+      "cons": (lista de 2 a 4 strings com os argumentos CONTRÁRIOS — seja honesto e rigoroso),
+      "thesis": (string: tese de investimento em 1 parágrafo explicando o racional de multiplicar o capital)
+    }}
+  ],
+  "dividend_opportunities": [
+    {{
+      "symbol": (string: ticker — priorize FIIs de logística/shoppings, ações de utilities, energia, saneamento com DY acima de 11%),
+      "sector": (string: setor/nicho),
+      "estimated_dy": (string: ex "13.2%"),
+      "safety_score": (string: exatamente "Alta", "Média-Alta" ou "Média"),
+      "niche": (string: descrição do nicho ex "FII de Galpões Logísticos", "Distribuidora de Energia"),
+      "reasoning": (string: por que este ativo é seguro e sustenta esse DY),
+      "portfolio_fit": (string: como este ativo complementa e equilibra a carteira atual do investidor com base nas posições já existentes)
+    }}
+  ],
+  "portfolio_balance": {{
+    "assessment": (string: avaliação do equilíbrio atual — analise concentração, diversificação por setor e moeda),
+    "rebalance_actions": (lista de 2-5 strings com ações concretas para rebalancear a carteira, considerando os ativos já existentes)
+  }},
   "suggestions": [
-    (string, recomendação de um ticker novo para adicionar à carteira com justificativa),
-    (string, outra recomendação)
+    (string: 1 sugestão geral não coberta pelas outras seções),
+    (string: outra sugestão)
   ]
-}
+}}
+Retorne no mínimo 3 trading_opportunities e 4 dividend_opportunities.
 """
 
     try:

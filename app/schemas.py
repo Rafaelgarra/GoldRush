@@ -128,10 +128,37 @@ class AssetAnalysis(BaseModel):
     alert_flag: Optional[str] = None
     reasoning: str
 
+class TradingOpportunity(BaseModel):
+    symbol: str
+    sector: str
+    current_price_ref: str
+    target_price: str
+    upside_potential: str
+    risk_level: str   # "Alto", "Muito Alto"
+    pros: List[str]
+    cons: List[str]
+    thesis: str       # tese de investimento em 1 parágrafo
+
+class DividendOpportunity(BaseModel):
+    symbol: str
+    sector: str
+    estimated_dy: str   # ex: "13.5%"
+    safety_score: str   # "Alta", "Média-Alta"
+    niche: str          # ex: "Energia Elétrica", "FII Logística"
+    reasoning: str
+    portfolio_fit: str  # como equilibra com o portfólio atual
+
+class PortfolioBalance(BaseModel):
+    assessment: str     # análise do equilíbrio atual
+    rebalance_actions: List[str]  # ações sugeridas pra rebalancear
+
 class AIAnalysisResponse(BaseModel):
     health_score: int
     market_comparison: str
     risk_assessment: str
     dividend_analysis: str
     assets_analysis: List[AssetAnalysis]
+    trading_opportunities: List[TradingOpportunity]
+    dividend_opportunities: List[DividendOpportunity]
+    portfolio_balance: PortfolioBalance
     suggestions: List[str]
