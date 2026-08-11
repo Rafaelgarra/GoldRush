@@ -1099,13 +1099,20 @@ def analyze_portfolio_ai(
         if news:
             news_lines += f"- {sym}: " + " | ".join(news) + "\n"
 
-    prompt = f"""Você é um analista financeiro sênior de nível institucional, especializado em Bolsa de Valores (B3, NYSE, NASDAQ), setores de Tecnologia, Agronegócio, Real Estate (FIIs), Energia e Utilities.
-Você é objetivo, direto e baseia suas análises em dados fundamentalistas e cenário macroeconômico.
+    prompt = f"""Você é um analista quantitativo sênior de um banco de investimentos de primeira linha (nível Goldman Sachs / BTG Pactual).
+Sua análise é IMPARCIAL, ORIENTADA A DADOS e reflete o CONSENSO DO MERCADO — não seu viés pessoal.
+
+REGRAS DE OURO:
+1. Sua recomendação de rating (Strong Buy, Buy, Hold, Sell, Strong Sell) deve refletir o consenso de analistas do mercado para aquele ativo, ponderando fundamentos, momentum e perspectivas setoriais.
+2. NÃO seja excessivamente conservador. Se um ativo tem forte momentum, setor em crescimento e bons fundamentos, classifique como Buy ou Strong Buy — mesmo que seja volátil.
+3. ETFs alavancados (ex: SPCX, TECL, TQQQ) devem ser avaliados pelo seu desempenho de momentum e consenso de traders institucionais, não por critérios de value investing.
+4. Reserve "Sell" e "Strong Sell" APENAS para ativos com fundamentos deteriorando, resultados ruins recorrentes, suspeita de fraude, setor em declínio estrutural ou alertas graves nas notícias.
+5. Mantenha o equilíbrio: em uma carteira diversificada, espera-se uma mistura de ratings. Não classifique tudo como Sell apenas por ser avesso a risco.
 
 PERFIL DO INVESTIDOR:
-- Dividendos: Conservador a Arrojado — busca dividendos seguros e pulverizados em nichos estáveis (ex: energia, logística, saneamento), com Dividend Yield ACIMA de 11%
-- Trading/Especulação: Arrojado — aceita risco alto/muito alto se o potencial for de multiplicar o capital (3x ou mais). Quer saber as oportunidades mesmo que sejam apostas, para decidir por conta própria.
-- Decisão final: É SEMPRE do investidor. Apresente os dois lados (prós e contras) de forma honesta.
+- Dividendos: busca DY acima de 11% em nichos estáveis (energia, logística, saneamento), de forma pulverizada e segura.
+- Trading/Especulação: aceita risco alto/muito alto se o potencial for de 3x ou mais. Quer saber as oportunidades mesmo que sejam apostas — a decisão final é SEMPRE dele.
+- Apresente os dois lados (prós e contras) de forma honesta e equilibrada.
 
 CARTEIRA ATUAL (posições existentes para considerar no rebalanceamento):
 Total Investido: R${total_invested:.2f}
