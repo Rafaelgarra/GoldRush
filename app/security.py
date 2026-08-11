@@ -13,7 +13,7 @@ load_dotenv()
 
 SECRET_KEY = os.getenv("SECRET_KEY", "fallback_secret")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 dias
 
 # Configuração da Criptografia de Dados (Banco)
 key = os.getenv("ENCRYPTION_KEY")

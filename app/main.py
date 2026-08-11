@@ -32,15 +32,11 @@ app.add_middleware(
 )
 
 # --- CORS ---
-origins = [
-    "http://localhost:3000",
-    "https://goldrush-web.vercel.app",
-    os.getenv("FRONTEND_URL", "http://localhost:3000"),
-]
+# Aceita qualquer origem para não bloquear previews do Vercel ou outros domínios do usuário
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
