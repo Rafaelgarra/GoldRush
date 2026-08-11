@@ -48,8 +48,9 @@ def is_market_open_nyse() -> bool:
 def get_cache_ttl(symbol: str) -> int:
     """
     TTL dinâmico em segundos baseado no tipo de ativo e horário.
+    - Cripto: 15s (mercado 24/7)
     - Durante pregão: 10s (atualização frequente)
-    - Fora do pregão: 8 horas (preço não muda)
+    - Fora do pregão: 60s (ainda atualiza frequentemente para dados frescos na UI)
     """
     is_us = symbol.endswith("-USD") or (
         not symbol.endswith(".SA") and len(symbol) <= 5 and symbol.isalpha()
@@ -60,7 +61,7 @@ def get_cache_ttl(symbol: str) -> int:
         return 15  # Cripto não fecha — 15s sempre
 
     market_open = is_market_open_nyse() if is_us else is_market_open_b3()
-    return 10 if market_open else 28800  # 10s pregão / 8h fora
+    return 10 if market_open else 60  # 10s pregão / 60s fora (sempre busca recente)
 
 
 def get_cached_price(symbol: str) -> Optional[float]:
@@ -103,8 +104,8 @@ def get_cache_info() -> dict:
 def get_db_cached_price(symbol: str, db) -> Optional[float]:
     """
     Busca preço do banco (PriceCache).
-    Aceita dados com até 1 hora de idade durante pregão,
-    ou 24 horas fora do pregão.
+    - Durante pregão: aceita até 60s
+    - Fora do pregão: aceita até 4 horas (garante preço do fechamento atual do dia)
     """
     from app.models import PriceCache
 
@@ -113,7 +114,7 @@ def get_db_cached_price(symbol: str, db) -> Optional[float]:
         return None
 
     age = (datetime.utcnow() - cache.updated_at).total_seconds()
-    max_age = 3600 if is_market_open_b3() or is_market_open_nyse() else 86400
+    max_age = 60 if is_market_open_b3() or is_market_open_nyse() else 14400  # 60s / 4h
 
     if age > max_age:
         return None
