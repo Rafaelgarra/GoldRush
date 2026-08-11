@@ -145,6 +145,15 @@ async def get_current_user(
 
 
 # =======================
+# 🌐 HEALTH CHECK (RENDER)
+# =======================
+
+@app.get("/")
+@app.head("/")
+def read_root():
+    return {"status": "ok", "app": "GoldRush API"}
+
+# =======================
 # 🔐 AUTENTICAÇÃO
 # =======================
 
