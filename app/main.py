@@ -390,14 +390,18 @@ def sell_asset(
 
 @app.get("/api/portfolio/sold", response_model=List[schemas.SoldPositionResponse])
 def get_sold_positions(
+    skip: int = 0,
+    limit: int = 100,
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Retorna o histórico completo de vendas do usuário, do mais recente ao mais antigo."""
+    """Retorna o histórico completo de vendas do usuário, com paginação."""
     return (
         db.query(models.SoldPosition)
         .filter(models.SoldPosition.owner_id == current_user.id)
         .order_by(models.SoldPosition.sell_date.desc())
+        .offset(skip)
+        .limit(limit)
         .all()
     )
 
@@ -1131,11 +1135,21 @@ def get_cached_ai_analysis(
     return json.loads(cached.analysis_json)
 
 
+import time
+
+last_ai_call = {}
+
 @app.post("/api/ai/analyze", response_model=schemas.AIAnalysisResponse)
 def analyze_portfolio_ai(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    now = time.time()
+    if current_user.id in last_ai_call:
+        if now - last_ai_call[current_user.id] < 60:
+            raise HTTPException(status_code=429, detail="Muitas requisições. Aguarde 1 minuto.")
+    last_ai_call[current_user.id] = now
+
     import os
     import json
     import google.generativeai as genai
