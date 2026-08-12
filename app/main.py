@@ -321,6 +321,122 @@ def update_asset(
 
 
 # =======================
+# 💸 VENDAS (POSIÇÕES ENCERRADAS)
+# =======================
+
+@app.post("/api/portfolio/{asset_id}/sell")
+def sell_asset(
+    asset_id: int,
+    sell_data: schemas.SellRequest,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Registra a venda (total ou parcial) de um ativo.
+    - Venda parcial: reduz a quantidade do Asset existente.
+    - Venda total: remove o Asset e registra em sold_positions.
+    """
+    asset = db.query(models.Asset).filter(models.Asset.id == asset_id).first()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Ativo não encontrado")
+    if asset.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Sem permissão")
+
+    try:
+        current_qty = float(security.decrypt_data(asset.quantity_enc))
+        avg_price = float(security.decrypt_data(asset.price_paid_enc))
+    except Exception:
+        raise HTTPException(status_code=500, detail="Erro ao descriptografar dados do ativo")
+
+    if sell_data.quantity_sold > current_qty + 0.0001:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Quantidade a vender ({sell_data.quantity_sold}) maior que a posição ({current_qty})"
+        )
+
+    realized_profit = (sell_data.sell_price - avg_price) * sell_data.quantity_sold
+
+    # Registra a venda no histórico
+    sold = models.SoldPosition(
+        owner_id=current_user.id,
+        symbol=asset.symbol,
+        asset_type=asset.asset_type,
+        currency=asset.currency,
+        quantity_sold=sell_data.quantity_sold,
+        avg_price_paid=round(avg_price, 6),
+        sell_price=sell_data.sell_price,
+        realized_profit=round(realized_profit, 2),
+    )
+    db.add(sold)
+
+    remaining = current_qty - sell_data.quantity_sold
+    if remaining < 0.0001:
+        # Venda total — remove o asset
+        db.delete(asset)
+    else:
+        # Venda parcial — atualiza a quantidade mantendo o preço médio
+        asset.quantity_enc = security.encrypt_data(str(round(remaining, 6)))
+
+    db.commit()
+
+    capital_returned = round(sell_data.quantity_sold * sell_data.sell_price, 2)
+    return {
+        "message": "Venda registrada com sucesso",
+        "realized_profit": round(realized_profit, 2),
+        "capital_returned": capital_returned,
+        "remaining_quantity": round(remaining, 6) if remaining >= 0.0001 else 0,
+    }
+
+
+@app.get("/api/portfolio/sold", response_model=List[schemas.SoldPositionResponse])
+def get_sold_positions(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Retorna o histórico completo de vendas do usuário, do mais recente ao mais antigo."""
+    return (
+        db.query(models.SoldPosition)
+        .filter(models.SoldPosition.owner_id == current_user.id)
+        .order_by(models.SoldPosition.sell_date.desc())
+        .all()
+    )
+
+
+@app.get("/api/portfolio/realized-pnl", response_model=schemas.RealizedPnLResponse)
+def get_realized_pnl(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Retorna o resumo do lucro/prejuízo realizado total."""
+    sales = (
+        db.query(models.SoldPosition)
+        .filter(models.SoldPosition.owner_id == current_user.id)
+        .all()
+    )
+    if not sales:
+        return {
+            "total_realized_profit": 0,
+            "total_capital_returned": 0,
+            "total_sales": 0,
+            "winning_trades": 0,
+            "losing_trades": 0,
+        }
+
+    total_profit = sum(s.realized_profit for s in sales)
+    total_capital = sum(s.quantity_sold * s.sell_price for s in sales)
+    winning = sum(1 for s in sales if s.realized_profit > 0)
+    losing = sum(1 for s in sales if s.realized_profit <= 0)
+
+    return {
+        "total_realized_profit": round(total_profit, 2),
+        "total_capital_returned": round(total_capital, 2),
+        "total_sales": len(sales),
+        "winning_trades": winning,
+        "losing_trades": losing,
+    }
+
+
+# =======================
 # 📋 WATCHLIST (PROTEGIDO)
 # =======================
 
@@ -1109,7 +1225,23 @@ def analyze_portfolio_ai(
         except:
             pass
 
-    # 4. Constrói o Prompt
+    # 4. Busca histórico de vendas
+    sold_positions = (
+        db.query(models.SoldPosition)
+        .filter(models.SoldPosition.owner_id == current_user.id)
+        .order_by(models.SoldPosition.sell_date.desc())
+        .limit(10)
+        .all()
+    )
+    
+    sold_lines = ""
+    total_realized = 0
+    for s in sold_positions:
+        total_realized += s.realized_profit
+        result = "LUCRO" if s.realized_profit >= 0 else "PREJUÍZO"
+        sold_lines += f"- {s.symbol}: Vendeu {s.quantity_sold:.2f} cotas a R${s.sell_price:.2f} (PM R${s.avg_price_paid:.2f}). {result}: R${s.realized_profit:.2f}\n"
+
+    # 5. Constrói o Prompt
     portfolio_lines = ""
     for p in portfolio_details:
         portfolio_lines += f"- {p['symbol']}: Peso {p['weight_pct']:.1f}%, Preço médio R${p['avg_price']:.2f}, Preço atual R${p['current_price']:.2f}, Rentabilidade {p['profit_pct']:.1f}%\n"
@@ -1140,6 +1272,10 @@ Total Atual: R${total_current:.2f}
 Resultado: {((total_current - total_invested) / total_invested)*100 if total_invested > 0 else 0:.2f}%
 
 {portfolio_lines}
+
+HISTÓRICO DE VENDAS RECENTES (lucro/prejuízo realizado):
+{sold_lines if sold_lines else "Nenhuma venda registrada."}
+Lucro realizado total: R${total_realized:.2f}
 
 NOTÍCIAS RECENTES DOS ATIVOS (últimos 5 dias):
 {news_lines if news_lines else "Nenhuma notícia relevante encontrada."}

@@ -38,6 +38,36 @@ class AssetResponse(AssetCreate):
         from_attributes = True
 
 
+# ─── Sell / Realized P&L ─────────────────────────────────────
+
+class SellRequest(BaseModel):
+    quantity_sold: float = Field(..., gt=0)
+    sell_price: float = Field(..., gt=0)
+
+
+class SoldPositionResponse(BaseModel):
+    id: int
+    symbol: str
+    asset_type: Optional[str] = None
+    currency: str
+    quantity_sold: float
+    avg_price_paid: float
+    sell_price: float
+    realized_profit: float
+    sell_date: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class RealizedPnLResponse(BaseModel):
+    total_realized_profit: float
+    total_capital_returned: float   # quanto voltou pro bolso (qty * sell_price)
+    total_sales: int
+    winning_trades: int
+    losing_trades: int
+
+
 # ─── Watchlist ───────────────────────────────────────────────
 
 class WatchlistCreate(BaseModel):

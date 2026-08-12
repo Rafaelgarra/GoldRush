@@ -103,3 +103,25 @@ class AIAnalysisCache(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True)
     analysis_json = Column(Text, nullable=False)
     date_generated = Column(Date, nullable=False, default=datetime.utcnow)
+
+
+class SoldPosition(Base):
+    """
+    Registro histórico de posições encerradas (vendas).
+    Cada venda (total ou parcial) gera um registro aqui.
+    """
+    __tablename__ = "sold_positions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    symbol = Column(String, nullable=False, index=True)
+    asset_type = Column(String, nullable=True)
+    currency = Column(String, default="BRL")
+
+    quantity_sold = Column(Float, nullable=False)
+    avg_price_paid = Column(Float, nullable=False)   # preço médio de aquisição na hora da venda
+    sell_price = Column(Float, nullable=False)        # preço de venda por cota
+    realized_profit = Column(Float, nullable=False)   # lucro/prejuízo absoluto realizado
+    sell_date = Column(DateTime, default=datetime.utcnow)
+
+    owner = relationship("User")
