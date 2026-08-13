@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field, EmailStr
 from datetime import date, datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 
 # ─── Auth ────────────────────────────────────────────────────
