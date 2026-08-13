@@ -60,12 +60,15 @@ class SoldPositionResponse(BaseModel):
         from_attributes = True
 
 
+class CurrencyPnL(BaseModel):
+    realized_profit: float
+    capital_returned: float
+
 class RealizedPnLResponse(BaseModel):
-    total_realized_profit: float
-    total_capital_returned: float   # quanto voltou pro bolso (qty * sell_price)
     total_sales: int
     winning_trades: int
     losing_trades: int
+    by_currency: Dict[str, CurrencyPnL]
 
 
 # ─── Watchlist ───────────────────────────────────────────────

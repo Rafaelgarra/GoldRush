@@ -419,24 +419,33 @@ def get_realized_pnl(
     )
     if not sales:
         return {
-            "total_realized_profit": 0,
-            "total_capital_returned": 0,
             "total_sales": 0,
             "winning_trades": 0,
             "losing_trades": 0,
+            "by_currency": {}
         }
 
-    total_profit = sum(s.realized_profit for s in sales)
-    total_capital = sum(s.quantity_sold * s.sell_price for s in sales)
     winning = sum(1 for s in sales if s.realized_profit > 0)
     losing = sum(1 for s in sales if s.realized_profit <= 0)
 
+    by_curr = {}
+    for s in sales:
+        curr = s.currency or "BRL"
+        if curr not in by_curr:
+            by_curr[curr] = {"realized_profit": 0.0, "capital_returned": 0.0}
+        
+        by_curr[curr]["realized_profit"] += s.realized_profit
+        by_curr[curr]["capital_returned"] += (s.quantity_sold * s.sell_price)
+
+    for curr in by_curr:
+        by_curr[curr]["realized_profit"] = round(by_curr[curr]["realized_profit"], 2)
+        by_curr[curr]["capital_returned"] = round(by_curr[curr]["capital_returned"], 2)
+
     return {
-        "total_realized_profit": round(total_profit, 2),
-        "total_capital_returned": round(total_capital, 2),
         "total_sales": len(sales),
         "winning_trades": winning,
         "losing_trades": losing,
+        "by_currency": by_curr,
     }
 
 
