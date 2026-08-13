@@ -297,47 +297,6 @@ def delete_asset(
     return {"message": "Ativo removido com sucesso"}
 
 
-@app.post("/api/portfolio/fix-prices")
-def fix_prices_migration(
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """
-    Migração: corrige ativos onde o usuário cadastrou o TOTAL PAGO 
-    no campo 'price_paid' em vez do preço unitário.
-    Divide price_paid por quantity para todos os ativos com qty > 1.
-    """
-    assets = (
-        db.query(models.Asset)
-        .filter(models.Asset.owner_id == current_user.id)
-        .all()
-    )
-    
-    fixed = []
-    for asset in assets:
-        try:
-            qty = float(security.decrypt_data(asset.quantity_enc))
-            price = float(security.decrypt_data(asset.price_paid_enc))
-            
-            if qty > 1:
-                unit_price = round(price / qty, 6)
-                asset.price_paid_enc = security.encrypt_data(str(unit_price))
-                fixed.append({
-                    "symbol": asset.symbol,
-                    "qty": qty,
-                    "old_price": price,
-                    "new_unit_price": unit_price,
-                })
-        except Exception as e:
-            print(f"Erro fix-prices asset {asset.id}: {e}")
-            continue
-    
-    db.commit()
-    return {
-        "message": f"Corrigidos {len(fixed)} ativos",
-        "details": fixed,
-    }
-
 @app.put("/api/portfolio/{asset_id}")
 def update_asset(
     asset_id: int,
